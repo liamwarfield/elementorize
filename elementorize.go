@@ -59,12 +59,13 @@ func loadWords(c chan string) {
 			err = scanner.Err()
 			if err == nil {
 				log.Println("Scan completed and reached EOF")
+				close(c)
 				break
 			} else {
 				log.Fatal(err)
 			}
 		}
-		fmt.Println("found:", scanner.Text())
+		//fmt.Println("found:", scanner.Text())
 		c <- scanner.Text()
 	}
 	// Get data from scan with Bytes() or Text()
@@ -75,44 +76,50 @@ func loadWords(c chan string) {
 func elementorize(elements *[]string, words chan string, output chan string) {
 	for {
 		select {
-		case word := <-words:
+		case word, ok := <-words:
+			if !ok {
+				close(output)
+				return
+			}
 			word = strings.ToLower(word)
-			fmt.Println("Processing: ", word)
+			//fmt.Println("Processing: ", word)
 			sbstr := ""
-			output := ""
+			outputstr := ""
 			for _, letter := range word {
 				sbstr += string(letter)
 				for _, element := range *elements {
 					//fmt.Println(sbstr, strings.ToLower(element))
 					if sbstr == strings.ToLower(element) {
 						sbstr = ""
-						output += "[" + element + "]"
-						//fmt.Println(output)
+						outputstr += "[" + element + "]"
+						//fmt.Println(outputstr)
 					} else if len(sbstr) > 2 {
-						output = ""
+						outputstr = ""
 						break
 					}
 				}
 				//fmt.Println(sbstr)
 			}
-			if output != "" {
-				fmt.Println("processed: ", output)
+			if outputstr != "" {
+				//fmt.Println("processed: ", outputstr)
+				output <- outputstr
 			}
 		default:
-			fmt.Println("somethingbad")
+			//fmt.Println("somethingbad")
 		}
 	}
 }
 func main() {
-	wordPipeline := make(chan string, 100000000)
+	wordPipeline := make(chan string, 10000)
 	outputPipeline := make(chan string, 10000)
 	elements := make([]string, 0)
 
 	elements = loadElements()
 	go loadWords(wordPipeline)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 4; i++ {
 		go elementorize(&elements, wordPipeline, outputPipeline)
 	}
-	for {
+	for i := range outputPipeline {
+		fmt.Println("Elementalized", i)
 	}
 }
