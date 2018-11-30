@@ -6,7 +6,13 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 )
+
+type SafeClose struct {
+	c   bool
+	mux sync.Mutex
+}
 
 func loadElements() []string {
 	// Open file and create scanner on top of it
@@ -14,12 +20,9 @@ func loadElements() []string {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	scanner := bufio.NewScanner(file)
 	elements := make([]string, 0)
-	// Default scanner is bufio.ScanLines. Lets use ScanWords.
-	// Could also use a custom function of SplitFunc type
-
-	// Scan for next token.
 	for {
 		success := scanner.Scan()
 		if success == false {
@@ -36,22 +39,17 @@ func loadElements() []string {
 		elements = append(elements, scanner.Text())
 	}
 	fmt.Println(elements)
-	// Get data from scan with Bytes() or Text()
-
-	// Call scanner.Scan() again to find next token
 	return elements
 }
+
 func loadWords(c chan string) {
 	// Open file and create scanner on top of it
 	file, err := os.Open("words.txt")
 	if err != nil {
 		log.Fatal(err)
 	}
-	scanner := bufio.NewScanner(file)
-	// Default scanner is bufio.ScanLines. Lets use ScanWords.
-	// Could also use a custom function of SplitFunc type
 
-	// Scan for next token.
+	scanner := bufio.NewScanner(file)
 	for {
 		success := scanner.Scan()
 		if success == false {
@@ -65,59 +63,58 @@ func loadWords(c chan string) {
 				log.Fatal(err)
 			}
 		}
-		//fmt.Println("found:", scanner.Text())
 		c <- scanner.Text()
 	}
-	// Get data from scan with Bytes() or Text()
-
-	// Call scanner.Scan() again to find next token
 	return
 }
-func elementorize(elements *[]string, words chan string, output chan string) {
+
+func elementorize(elements *[]string, closed *SafeClose, words chan string, output chan string) {
 	for {
 		select {
 		case word, ok := <-words:
 			if !ok {
-				close(output)
+				if !closed.c {
+					closed.mux.Lock()
+					close(output)
+					closed.c = true
+					closed.mux.Unlock()
+				}
 				return
 			}
 			word = strings.ToLower(word)
-			//fmt.Println("Processing: ", word)
 			sbstr := ""
 			outputstr := ""
 			for _, letter := range word {
 				sbstr += string(letter)
 				for _, element := range *elements {
-					//fmt.Println(sbstr, strings.ToLower(element))
 					if sbstr == strings.ToLower(element) {
 						sbstr = ""
 						outputstr += "[" + element + "]"
-						//fmt.Println(outputstr)
 					} else if len(sbstr) > 2 {
 						outputstr = ""
 						break
 					}
 				}
-				//fmt.Println(sbstr)
 			}
-			if outputstr != "" {
-				//fmt.Println("processed: ", outputstr)
-				output <- outputstr
+			if outputstr != "" && sbstr == "" {
+				output <- word + " " + outputstr
 			}
 		default:
-			//fmt.Println("somethingbad")
+			fmt.Println("somethingbad")
 		}
 	}
 }
+
 func main() {
 	wordPipeline := make(chan string, 10000)
 	outputPipeline := make(chan string, 10000)
 	elements := make([]string, 0)
+	closed := SafeClose{c: false}
 
 	elements = loadElements()
 	go loadWords(wordPipeline)
 	for i := 0; i < 4; i++ {
-		go elementorize(&elements, wordPipeline, outputPipeline)
+		go elementorize(&elements, &closed, wordPipeline, outputPipeline)
 	}
 	for i := range outputPipeline {
 		fmt.Println("Elementalized", i)
